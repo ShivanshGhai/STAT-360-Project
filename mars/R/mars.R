@@ -140,6 +140,7 @@ mars <- function(formula, data, control = mars.control()) {
     qr = fit$qr,
     df.residual = fit$df.residual,
     xlevels = fit$xlevels,
+    call = fit$call,
     terms = fit$terms,
     model = fit$model
   )
