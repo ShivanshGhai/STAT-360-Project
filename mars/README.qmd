@@ -1,6 +1,6 @@
 ---
 title: "mars"
-author: "Shivansh Ghai"
+author: "Shivansh Ghai 301549429"
 format:
   html: default
 ---
@@ -40,8 +40,6 @@ This package implements a course-oriented MARS workflow with:
   control settings, helper algorithms, and dataset
 - `tests/testthat/` — unit tests for forward selection, backward pruning,
   model fitting, control settings, and prediction
-- `tests/testthat/helper-load.R` — helper file that loads the package
-  from source if it is not already installed
 - `tests/testthat.R` — testthat entry point
 - `test.R` — worked examples demonstrating fitting, prediction,
   plotting, summary, and ANOVA output
