@@ -1,0 +1,20 @@
+---
+title: "STAT 360 Submission Checklist"
+format: gfm
+---
+
+## GitHub / code submission
+
+- Upload the contents of `Final Submission/mars/` to your GitHub project folder/repository.
+- Make sure the repo contains the package source files, README, tests, examples, and documentation files.
+
+## Crowdmark / documentation submission
+
+- Submit the PDF version of `Final Submission/documentation_submission`.
+- Before submitting, replace the placeholder GitHub repo link with your real repository link.
+
+## Final quick checks
+
+- Confirm the repo is accessible to the TA if needed.
+- Confirm your PDF includes all rubric headings.
+- Confirm you are submitting from `Final Submission/` and not from other scratch/build folders.

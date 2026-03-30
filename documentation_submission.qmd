@@ -1,0 +1,157 @@
+---
+title: "STAT 360 Project Documentation for `mars()`"
+author: "Shivansh Ghai"
+format:
+  html: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+**Package / Repo:** `mars`\
+**Author:** Shivansh\
+**GitHub Repo Link:** <https://github.com/ShivanshGhai/STAT-360-Project>
+
+------------------------------------------------------------------------
+
+## 1. Description
+
+`mars()` fits an educational implementation of the Multivariate Adaptive
+Regression Splines (MARS) algorithm. It constructs a regression model
+using piecewise linear basis functions, first through forward stepwise
+basis generation and then through backward pruning.
+
+## 2. Usage
+
+``` r
+mars(formula, data, control = mars.control())
+```
+
+## 3. Arguments
+
+-   `formula`: a model formula specifying the response and predictor
+    variables.
+-   `data`: a data frame containing the variables in the formula.
+-   `control`: a `mars.control` object that stores algorithm settings
+    such as:
+    -   `Mmax`: maximum forward model size
+    -   `d`: pruning penalty used in the lack-of-fit criterion
+    -   `trace`: logical flag controlling printed tracing output
+
+## 4. Details
+
+The package follows the basic MARS workflow discussed in class.
+
+### Step 1: Forward stepwise construction
+
+The function `fwd_stepwise()` starts with the constant basis function
+`B0 = 1`. It then repeatedly searches over candidate reflected
+hinge-function pairs of the form:
+
+-   `max(t - x_j, 0)`
+-   `max(x_j - t, 0)`
+
+At each step, it evaluates candidate variables and knot values, and adds
+the pair that gives the best least-squares improvement.
+
+### Step 2: Backward pruning
+
+The forward model is generally too large, so `bwd_stepwise()` prunes
+basis functions using a lack-of-fit criterion `LOF()`. This criterion
+penalizes model complexity and is inspired by the generalized
+cross-validation idea used in MARS.
+
+### Step 3: Final least-squares fit
+
+After pruning, the selected basis matrix is used in a linear model fit
+with `lm()` and stored as an object of class `mars`, which also inherits
+from class `lm`.
+
+This design makes it easy to reuse familiar linear-model infrastructure
+while still exposing MARS-specific components such as:
+
+-   the selected basis matrix `B`
+-   the basis-function definitions `Bfuncs`
+-   the original predictor names `x_names`
+
+## 5. Value
+
+`mars()` returns an object of class `"mars"` and `"lm"`.
+
+Important components include:
+
+-   `call`: the model call
+-   `formula`: the original formula
+-   `y`: response values
+-   `B`: selected basis matrix
+-   `Bfuncs`: definitions of basis functions used in the model
+-   `x_names`: predictor names used during fitting
+-   `coefficients`: fitted regression coefficients
+-   `residuals`: model residuals
+-   `fitted.values`: fitted values
+-   `qr`, `rank`, `df.residual`, `terms`, `model`: inherited
+    linear-model components
+
+## 6. Author(s)
+
+Shivansh
+
+## 7. References
+
+-   Friedman, J. H. (1991). *Multivariate Adaptive Regression Splines*.
+    The Annals of Statistics, 19(1), 1–67.
+-   Hastie, Tibshirani, and Friedman. *The Elements of Statistical
+    Learning*, Section 9.4.
+
+## 8. See Also
+
+The package also provides the following methods and helper functions:
+
+-   `mars.control()`
+-   `predict.mars()`
+-   `print.mars()`
+-   `summary.mars()`
+-   `plot.mars()`
+-   `anova.mars()`
+-   `fwd_stepwise()`
+-   `bwd_stepwise()`
+-   `LOF()`
+
+## 9. Examples
+
+### Example 1: Fit a full model
+
+``` r
+library(mars)
+data(marstestdata)
+
+mc <- mars.control(Mmax = 10)
+fit <- mars(y ~ ., data = marstestdata, control = mc)
+print(fit)
+summary(fit)
+predict(fit)
+plot(fit)
+anova(fit)
+```
+
+### Example 2: Fit a model on the `mtcars` dataset
+
+``` r
+mtcars_data <- mtcars[, c("mpg", "disp", "hp", "wt", "qsec")]
+fit_mtcars <- mars(mpg ~ disp + hp + wt + qsec,
+                   data = mtcars_data,
+                   control = mars.control(Mmax = 8))
+predict(fit_mtcars, newdata = mtcars_data)
+summary(fit_mtcars)
+```
+
+### Example 3: Fit a model on the `longley` dataset
+
+``` r
+longley_data <- longley[, c("Employed", "GNP.deflator", "GNP", "Unemployed", "Population")]
+fit_longley <- mars(Employed ~ GNP.deflator + GNP + Unemployed + Population,
+                    data = longley_data,
+                    control = mars.control(Mmax = 6, d = 3, trace = FALSE))
+predict(fit_longley, newdata = longley_data)
+summary(fit_longley)
+```

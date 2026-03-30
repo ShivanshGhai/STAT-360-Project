@@ -1,0 +1,81 @@
+---
+title: "mars"
+author: "Shivansh Ghai"
+format:
+  html: default
+---
+
+## Project goal
+
+This package implements a course-oriented MARS workflow with:
+
+- a `mars(formula, data, control)` fitting interface
+- forward stepwise basis construction through `fwd_stepwise()`
+- backward pruning through `bwd_stepwise()` using the `LOF()` criterion
+- a final fitted object of class `mars` that inherits from `lm`
+- S3 methods for `print()`, `summary()`, `predict()`, `plot()`, and
+  `anova()`
+- unit tests and worked examples
+
+## Files
+
+- `DESCRIPTION` — package metadata
+- `NAMESPACE` — exported functions and registered S3 methods
+- `R/mars.R` — main implementation file containing:
+  - `mars.control()`
+  - `make_basis()`
+  - `basis_matrix()`
+  - `LOF()`
+  - `fwd_stepwise()`
+  - `bwd_stepwise()`
+  - `mars()`
+  - `predict.mars()`
+  - `print.mars()`
+  - `summary.mars()`
+  - `print.summary.mars()`
+  - `plot.mars()`
+  - `anova.mars()`
+- `data/marstestdata.rda` — dataset used in package examples and testing
+- `man/` — package documentation files for the main fitting function,
+  control settings, helper algorithms, and dataset
+- `tests/testthat/` — unit tests for forward selection, backward pruning,
+  model fitting, control settings, and prediction
+- `tests/testthat/helper-load.R` — helper file that loads the package
+  from source if it is not already installed
+- `tests/testthat.R` — testthat entry point
+- `test.R` — worked examples demonstrating fitting, prediction,
+  plotting, summary, and ANOVA output
+- `README.qmd` — source for this project README
+- `LICENSE` — MIT license text
+
+## Contribution
+
+This project was completed independently by Shivansh Ghai.
+
+## Running the package locally
+
+From an R session started in this folder:
+
+```r
+pkgload::load_all(".")
+testthat::test_dir("tests/testthat")
+source("test.R")
+```
+
+## Current implementation status
+
+The package currently includes the main pieces required for the STAT 360
+project:
+
+- a working MARS fit/predict pipeline
+- forward stepwise basis generation
+- backward pruning with a penalized lack-of-fit score
+- required S3 methods
+- documentation files
+- tests and worked examples
+
+## Notes
+
+This is an educational implementation intended to match the course
+project requirements and illustrate the main logic of MARS clearly,
+rather than reproduce every optimization used in production packages.

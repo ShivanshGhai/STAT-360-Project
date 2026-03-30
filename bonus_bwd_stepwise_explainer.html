@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.5.57">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Shivansh Ghai">
+
+<title>How the Backward Elimination Step Works in the mars Package</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="bonus_bwd_stepwise_explainer_files/libs/clipboard/clipboard.min.js"></script>
+<script src="bonus_bwd_stepwise_explainer_files/libs/quarto-html/quarto.js"></script>
+<script src="bonus_bwd_stepwise_explainer_files/libs/quarto-html/popper.min.js"></script>
+<script src="bonus_bwd_stepwise_explainer_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="bonus_bwd_stepwise_explainer_files/libs/quarto-html/anchor.min.js"></script>
+<link href="bonus_bwd_stepwise_explainer_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="bonus_bwd_stepwise_explainer_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="bonus_bwd_stepwise_explainer_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="bonus_bwd_stepwise_explainer_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="bonus_bwd_stepwise_explainer_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">How the Backward Elimination Step Works in the <code>mars</code> Package</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Shivansh Ghai </p>
+          </div>
+  </div>
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="purpose" class="level2">
+<h2 class="anchored" data-anchor-id="purpose">1. Purpose</h2>
+<p>This note explains how <code>bwd_stepwise()</code> implements the backward pruning stage of the project MARS package. The forward step creates a large basis expansion, and the backward step reduces it to a smaller model that balances fit and complexity.</p>
+<p>So the point of the backward step is not merely to delete terms. It is to choose a subset of basis functions that gives a good penalized fit.</p>
+</section>
+<section id="main-idea" class="level2">
+<h2 class="anchored" data-anchor-id="main-idea">2. Main idea</h2>
+<p>The input to <code>bwd_stepwise()</code> is the output of <code>fwd_stepwise()</code>, which contains:</p>
+<ul>
+<li><code>y</code>: the response vector</li>
+<li><code>B</code>: the forward basis matrix</li>
+<li><code>Bfuncs</code>: the symbolic basis-function definitions</li>
+</ul>
+<p>At each stage, the backward algorithm asks:</p>
+<blockquote class="blockquote">
+<p>If I delete one basis function from the current model, which deletion gives the best penalized fit?</p>
+</blockquote>
+<p>It tries every one-at-a-time deletion, keeps the deletion with the lowest lack-of-fit score, and continues. It also remembers the best model seen anywhere along the pruning path.</p>
+</section>
+<section id="the-lack-of-fit-criterion-lof" class="level2">
+<h2 class="anchored" data-anchor-id="the-lack-of-fit-criterion-lof">3. The lack-of-fit criterion <code>LOF()</code></h2>
+<p>The package uses:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>LOF <span class="ot">&lt;-</span> <span class="cf">function</span>(formula, data, control) {</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  fit <span class="ot">&lt;-</span> <span class="fu">lm</span>(formula, <span class="at">data =</span> data)</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  rss <span class="ot">&lt;-</span> <span class="fu">sum</span>(stats<span class="sc">::</span><span class="fu">residuals</span>(fit)<span class="sc">^</span><span class="dv">2</span>)</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  M <span class="ot">&lt;-</span> <span class="fu">ncol</span>(data) <span class="sc">-</span> <span class="dv">1</span>L</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  C_M <span class="ot">&lt;-</span> M <span class="sc">+</span> control<span class="sc">$</span>d <span class="sc">*</span> (M <span class="sc">-</span> <span class="dv">1</span>L) <span class="sc">/</span> <span class="dv">2</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>  rss <span class="sc">/</span> <span class="fu">nrow</span>(data) <span class="sc">/</span> (<span class="dv">1</span> <span class="sc">-</span> C_M <span class="sc">/</span> <span class="fu">nrow</span>(data))<span class="sc">^</span><span class="dv">2</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>This combines:</p>
+<ul>
+<li>a fit term through RSS</li>
+<li>a complexity penalty through <code>C_M</code></li>
+</ul>
+<p>Here:</p>
+<ul>
+<li><code>M</code> is the number of basis columns in the candidate model</li>
+<li><code>d</code> is the penalty parameter from <code>mars.control()</code></li>
+<li><code>C_M = M + d(M - 1)/2</code></li>
+</ul>
+<p>As the model gets larger, the penalty grows. So the backward step is not just minimizing RSS; it is looking for a smaller and better-balanced model.</p>
+</section>
+<section id="initialization" class="level2">
+<h2 class="anchored" data-anchor-id="initialization">4. Initialization</h2>
+<p>The function begins with:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>Mmax <span class="ot">&lt;-</span> <span class="fu">ncol</span>(fwd<span class="sc">$</span>B)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>Jstar <span class="ot">&lt;-</span> <span class="dv">2</span><span class="sc">:</span>Mmax</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>Kstar <span class="ot">&lt;-</span> Jstar</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">y =</span> fwd<span class="sc">$</span>y, fwd<span class="sc">$</span>B[, <span class="fu">c</span>(<span class="dv">1</span>, Jstar), <span class="at">drop =</span> <span class="cn">FALSE</span>])</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>lofstar <span class="ot">&lt;-</span> <span class="fu">LOF</span>(y <span class="sc">~</span> . <span class="sc">-</span> <span class="dv">1</span>, dat, control)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>The first column of <code>fwd$B</code> is <code>B0</code>, the constant basis function, so it is always kept. The code therefore tracks only the non-constant basis indices.</p>
+<p>The key objects are:</p>
+<ul>
+<li><code>Kstar</code>: the best subset at the current stage</li>
+<li><code>Jstar</code>: the best subset seen anywhere in the whole pruning path</li>
+<li><code>lofstar</code>: the best LOF value seen so far</li>
+</ul>
+<p>This distinction matters because the best overall model may appear before the end of the pruning sequence.</p>
+</section>
+<section id="outer-loop-shrink-the-model-gradually" class="level2">
+<h2 class="anchored" data-anchor-id="outer-loop-shrink-the-model-gradually">5. Outer loop: shrink the model gradually</h2>
+<p>The outer loop is:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (M <span class="cf">in</span> Mmax<span class="sc">:</span><span class="dv">2</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>So the algorithm starts with the full forward model and repeatedly considers smaller models.</p>
+<p>At each stage it sets:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>b <span class="ot">&lt;-</span> <span class="cn">Inf</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>L <span class="ot">&lt;-</span> Kstar</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>where:</p>
+<ul>
+<li><code>L</code> is the current active set of non-constant basis indices</li>
+<li><code>b</code> stores the best stagewise LOF among the one-deletion candidates</li>
+</ul>
+<p>If tracing is enabled, the active set is printed with:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (control<span class="sc">$</span>trace) <span class="fu">cat</span>(<span class="st">"L:"</span>, L, <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="inner-loop-test-each-possible-deletion" class="level2">
+<h2 class="anchored" data-anchor-id="inner-loop-test-each-possible-deletion">6. Inner loop: test each possible deletion</h2>
+<p>For each basis index <code>m</code> in the active set, the code forms a reduced subset:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>K <span class="ot">&lt;-</span> <span class="fu">setdiff</span>(L, m)</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">y =</span> fwd<span class="sc">$</span>y, fwd<span class="sc">$</span>B[, <span class="fu">c</span>(<span class="dv">1</span>, K), <span class="at">drop =</span> <span class="cn">FALSE</span>])</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>lof <span class="ot">&lt;-</span> <span class="fu">LOF</span>(y <span class="sc">~</span> . <span class="sc">-</span> <span class="dv">1</span>, dat, control)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>This means:</p>
+<ol type="1">
+<li>remove one basis term</li>
+<li>keep the intercept basis <code>B0</code></li>
+<li>fit the reduced model</li>
+<li>compute its LOF score</li>
+</ol>
+<p>This is the core backward elimination step in MARS.</p>
+</section>
+<section id="choosing-the-best-stagewise-deletion" class="level2">
+<h2 class="anchored" data-anchor-id="choosing-the-best-stagewise-deletion">7. Choosing the best stagewise deletion</h2>
+<p>The best deletion at the current stage is tracked using:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (lof <span class="sc">&lt;</span> b) {</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  b <span class="ot">&lt;-</span> lof</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  Kstar <span class="ot">&lt;-</span> K</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>So <code>Kstar</code> becomes the reduced subset with the smallest LOF among all one-deletion candidates at that stage.</p>
+<p>That subset is then used as the starting point for the next outer-loop iteration.</p>
+</section>
+<section id="tracking-the-best-model-overall" class="level2">
+<h2 class="anchored" data-anchor-id="tracking-the-best-model-overall">8. Tracking the best model overall</h2>
+<p>The code separately updates the best overall subset with:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (lof <span class="sc">&lt;</span> lofstar) {</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  lofstar <span class="ot">&lt;-</span> lof</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  Jstar <span class="ot">&lt;-</span> K</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>So even if a model is not just the best stagewise deletion but the best model seen anywhere on the pruning path, it is remembered in <code>Jstar</code>.</p>
+<p>At the end, the returned pruned model is based on <code>Jstar</code>, not simply on the final <code>Kstar</code>.</p>
+</section>
+<section id="small-conceptual-example" class="level2">
+<h2 class="anchored" data-anchor-id="small-conceptual-example">9. Small conceptual example</h2>
+<p>Suppose the forward pass produced basis columns:</p>
+<ul>
+<li><code>B0</code></li>
+<li><code>B1</code></li>
+<li><code>B2</code></li>
+<li><code>B3</code></li>
+<li><code>B4</code></li>
+</ul>
+<p>The backward step begins by testing all one-term deletions:</p>
+<ul>
+<li>keep <code>{B2, B3, B4}</code></li>
+<li>keep <code>{B1, B3, B4}</code></li>
+<li>keep <code>{B1, B2, B4}</code></li>
+<li>keep <code>{B1, B2, B3}</code></li>
+</ul>
+<p>If the LOF scores are:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>kept subset</th>
+<th style="text-align: right;">LOF</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>{B2, B3, B4}</code></td>
+<td style="text-align: right;">0.42</td>
+</tr>
+<tr class="even">
+<td><code>{B1, B3, B4}</code></td>
+<td style="text-align: right;">0.36</td>
+</tr>
+<tr class="odd">
+<td><code>{B1, B2, B4}</code></td>
+<td style="text-align: right;">0.39</td>
+</tr>
+<tr class="even">
+<td><code>{B1, B2, B3}</code></td>
+<td style="text-align: right;">0.48</td>
+</tr>
+</tbody>
+</table>
+<p>then the best stagewise deletion is the one leaving <code>{B1, B3, B4}</code>. That subset becomes the next working model, and if <code>0.36</code> is also the lowest LOF seen so far, it becomes <code>Jstar</code> as well.</p>
+</section>
+<section id="keeping-the-intercept-basis" class="level2">
+<h2 class="anchored" data-anchor-id="keeping-the-intercept-basis">10. Keeping the intercept basis</h2>
+<p>At the end of the procedure, the intercept basis is restored explicitly:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>Jstar <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">1</span>, Jstar)</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">list</span>(<span class="at">y =</span> fwd<span class="sc">$</span>y, <span class="at">B =</span> fwd<span class="sc">$</span>B[, Jstar, <span class="at">drop =</span> <span class="cn">FALSE</span>], <span class="at">Bfuncs =</span> fwd<span class="sc">$</span>Bfuncs[Jstar])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>This ensures that the final basis matrix includes <code>B0</code>, which acts as the intercept in the later linear model fit.</p>
+<p>That matches the fitting step in <code>mars()</code>, which uses:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">lm</span>(y <span class="sc">~</span> . <span class="sc">-</span> <span class="dv">1</span>, <span class="at">data =</span> <span class="fu">data.frame</span>(<span class="at">y =</span> y, bwd<span class="sc">$</span>B))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>The <code>- 1</code> is used because the basis matrix already contains the constant term.</p>
+</section>
+<section id="why-this-implementation-is-reasonable" class="level2">
+<h2 class="anchored" data-anchor-id="why-this-implementation-is-reasonable">11. Why this implementation is reasonable</h2>
+<p>This backward pruning approach works well for an educational MARS package because:</p>
+<ul>
+<li>it is easy to understand</li>
+<li>it follows the standard “grow then prune” MARS strategy</li>
+<li>it keeps the symbolic basis definitions and numerical basis matrix aligned</li>
+<li>it returns a pruned model that can still be used for interpretation and prediction</li>
+</ul>
+<p>Its main simplification is computational cost: each pruning stage refits multiple linear models from scratch. That is acceptable here because the goal is clarity rather than production-level optimization.</p>
+</section>
+<section id="summary" class="level2">
+<h2 class="anchored" data-anchor-id="summary">12. Summary</h2>
+<p><code>bwd_stepwise()</code> simplifies the forward basis expansion by repeatedly:</p>
+<ol type="1">
+<li>trying all one-term deletions</li>
+<li>computing the penalized LOF score for each reduced model</li>
+<li>keeping the best stagewise deletion</li>
+<li>remembering the best overall subset seen during pruning</li>
+</ol>
+<p>So the backward step turns the large forward model into a smaller final model by balancing goodness of fit against complexity.</p>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    // For code content inside modals, clipBoardJS needs to be initialized with a container option
+    // TODO: Check when it could be a function (https://github.com/zenorocha/clipboard.js/issues/860)
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      // TODO in 1.5, we should make sure this works without a callout special case
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

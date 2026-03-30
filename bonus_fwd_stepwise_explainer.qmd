@@ -1,0 +1,235 @@
+---
+title: "How `fwd_stepwise()` Works in the `mars` Package"
+author: "Shivansh Ghai"
+format:
+  html: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+## 1. Purpose
+
+This note explains how `fwd_stepwise()` builds the forward-pass basis
+expansion in the project MARS package. The forward step starts with a
+constant basis function and repeatedly adds the best reflected hinge pair
+it can find.
+
+The forward pass is intentionally greedy. At each stage it tries many
+candidate splits, keeps the one that gives the best least-squares
+improvement, and then moves on.
+
+## 2. Main idea
+
+The algorithm follows this pattern:
+
+1. start with the constant basis function `B0 = 1`
+2. treat each current basis function as a possible parent
+3. choose a candidate variable and knot value
+4. create the reflected hinge pair
+   - `max(t - x_j, 0)`
+   - `max(x_j - t, 0)`
+5. score the pair by residual sum of squares
+6. keep the best pair and add it to the basis expansion
+
+After several such additions, the forward model becomes an intentionally
+large basis expansion that can later be pruned.
+
+## 3. Main objects in the code
+
+The key objects are `x`, `y`, `Bfuncs`, `B`, and `best`.
+
+- `x` is the predictor matrix, converted to numeric matrix form
+- `y` is the response vector
+- `Bfuncs` stores the basis functions symbolically
+- `B` stores the numerical basis matrix evaluated on the training data
+- `best` stores the best split found in the current forward iteration
+
+The forward step starts with:
+
+```r
+Bfuncs <- list(NULL)
+B <- data.frame(B0 = rep(1, nrow(x)))
+```
+
+Here `NULL` represents the constant basis function, and `B0` is the first
+column of the basis matrix.
+
+## 4. Symbolic basis representation
+
+Each non-constant basis function is stored as a small matrix whose rows
+contain:
+
+- `s`: the sign (`-1` or `1`)
+- `v`: the predictor index
+- `t`: the knot value
+
+So:
+
+- `(s = 1, v = 3, t = 2.5)` means `max(x[,3] - 2.5, 0)`
+- `(s = -1, v = 3, t = 2.5)` means `max(2.5 - x[,3], 0)`
+
+If multiple rows are stacked together, the basis function is the product of
+multiple hinge factors. This is how the package represents more localized
+basis terms.
+
+## 5. Evaluating a basis function
+
+The helper function `make_basis(x, funcs)` converts the symbolic form into
+a numeric vector. Its core line is:
+
+```r
+b <- b * pmax(s * (x[, v] - t), 0)
+```
+
+This handles both hinge directions at once:
+
+- `s = 1` gives `max(x[, v] - t, 0)`
+- `s = -1` gives `max(t - x[, v], 0)`
+
+If `funcs` is `NULL`, the function returns a vector of ones, corresponding
+to the intercept basis.
+
+## 6. The forward search
+
+The outer loop is:
+
+```r
+for (step in seq_len(control$Mmax / 2))
+```
+
+Each iteration adds exactly two new basis functions: a left hinge and a
+right hinge.
+
+Inside that loop, the code examines every current basis function as a
+possible parent:
+
+```r
+for (m in seq_along(Bfuncs))
+```
+
+For each parent basis, it computes:
+
+```r
+curf <- Bfuncs[[m]]
+used_vars <- if (is.null(curf)) integer() else curf[, "v"]
+cand_vars <- setdiff(seq_len(ncol(x)), used_vars)
+baseb <- B[[m]]
+```
+
+This means:
+
+- `curf` is the symbolic parent basis
+- `used_vars` lists variables already used in that basis
+- `cand_vars` are the remaining candidate variables
+- `baseb` gives the parent basis values on the training data
+
+The use of `setdiff()` prevents reuse of the same variable inside a single
+basis term. That is a simplifying choice in this educational version.
+
+## 7. Choosing knot values and building the reflected pair
+
+For each candidate variable `v`, the code looks only at knot values in the
+active region of the parent basis:
+
+```r
+xs <- sort(unique(x[baseb > 0, v]))
+if (length(xs) <= 2) next
+```
+
+Only interior knot values are used:
+
+```r
+for (t in xs[2:(length(xs) - 1)])
+```
+
+For each knot `t`, the reflected pair is created as:
+
+```r
+leftf <- rbind(curf, c(s = -1, v = v, t = t))
+rightf <- rbind(curf, c(s = 1, v = v, t = t))
+```
+
+If the parent basis is `B_m(x)`, these correspond to:
+
+- `B_m(x) * max(t - x_v, 0)`
+- `B_m(x) * max(x_v - t, 0)`
+
+That is the core MARS forward-step idea.
+
+## 8. Scoring a candidate split
+
+The two proposed basis vectors are evaluated and temporarily added to the
+current model:
+
+```r
+dat <- data.frame(y = y, B, new1 = b1, new2 = b2)
+rss <- sum(stats::residuals(stats::lm(y ~ . - 1, data = dat))^2)
+```
+
+The model uses `- 1` because `B0` already acts as the intercept.
+
+The score is the residual sum of squares. If the candidate improves on the
+current best score, the code saves it:
+
+```r
+if (rss < best$score - 1e-12) {
+  best <- list(score = rss, leftf = leftf, rightf = rightf)
+}
+```
+
+So each forward iteration ends with exactly one winning reflected pair.
+
+## 9. Updating the basis expansion
+
+After the search is complete, the winning pair is appended to both the
+symbolic list and the numerical basis matrix:
+
+```r
+Bfuncs[[length(Bfuncs) + 1L]] <- best$leftf
+Bfuncs[[length(Bfuncs) + 1L]] <- best$rightf
+B[[paste0("B", ncol(B))]] <- make_basis(x, best$leftf)
+B[[paste0("B", ncol(B))]] <- make_basis(x, best$rightf)
+```
+
+This keeps `Bfuncs` and `B` synchronized. The function then returns:
+
+```r
+list(y = y, B = B, Bfuncs = Bfuncs)
+```
+
+That forward model is later sent to `bwd_stepwise()` for pruning.
+
+## 10. Small example
+
+Suppose the current model contains only `B0 = 1`, and we consider `x1`
+with knot `t = 3`. The reflected pair becomes:
+
+- `B1(x) = max(3 - x1, 0)`
+- `B2(x) = max(x1 - 3, 0)`
+
+For `x1 = (1, 2, 3, 4, 6)`, these evaluate to:
+
+| `x1` | `B1` | `B2` |
+|---:|---:|---:|
+| 1 | 2 | 0 |
+| 2 | 1 | 0 |
+| 3 | 0 | 0 |
+| 4 | 0 | 1 |
+| 6 | 0 | 3 |
+
+These two basis functions allow different behaviour on the two sides of a
+knot, which is the core nonlinear idea in MARS.
+
+## 11. Summary
+
+`fwd_stepwise()` grows the MARS basis expansion by repeatedly:
+
+1. searching over parent bases, variables, and knots
+2. forming a reflected hinge pair
+3. scoring it by residual sum of squares
+4. keeping the best pair
+5. adding that pair to the basis representation
+
+So the forward step builds a flexible, over-complete basis expansion that
+is later simplified by backward pruning.

@@ -1,0 +1,253 @@
+---
+title: "How the Backward Elimination Step Works in the `mars` Package"
+author: "Shivansh Ghai"
+format:
+  html: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+## 1. Purpose
+
+This note explains how `bwd_stepwise()` implements the backward pruning
+stage of the project MARS package. The forward step creates a large basis
+expansion, and the backward step reduces it to a smaller model that
+balances fit and complexity.
+
+So the point of the backward step is not merely to delete terms. It is to
+choose a subset of basis functions that gives a good penalized fit.
+
+## 2. Main idea
+
+The input to `bwd_stepwise()` is the output of `fwd_stepwise()`, which
+contains:
+
+- `y`: the response vector
+- `B`: the forward basis matrix
+- `Bfuncs`: the symbolic basis-function definitions
+
+At each stage, the backward algorithm asks:
+
+> If I delete one basis function from the current model, which deletion
+> gives the best penalized fit?
+
+It tries every one-at-a-time deletion, keeps the deletion with the lowest
+lack-of-fit score, and continues. It also remembers the best model seen
+anywhere along the pruning path.
+
+## 3. The lack-of-fit criterion `LOF()`
+
+The package uses:
+
+```r
+LOF <- function(formula, data, control) {
+  fit <- lm(formula, data = data)
+  rss <- sum(stats::residuals(fit)^2)
+  M <- ncol(data) - 1L
+  C_M <- M + control$d * (M - 1L) / 2
+  rss / nrow(data) / (1 - C_M / nrow(data))^2
+}
+```
+
+This combines:
+
+- a fit term through RSS
+- a complexity penalty through `C_M`
+
+Here:
+
+- `M` is the number of basis columns in the candidate model
+- `d` is the penalty parameter from `mars.control()`
+- `C_M = M + d(M - 1)/2`
+
+As the model gets larger, the penalty grows. So the backward step is not
+just minimizing RSS; it is looking for a smaller and better-balanced
+model.
+
+## 4. Initialization
+
+The function begins with:
+
+```r
+Mmax <- ncol(fwd$B)
+Jstar <- 2:Mmax
+Kstar <- Jstar
+dat <- data.frame(y = fwd$y, fwd$B[, c(1, Jstar), drop = FALSE])
+lofstar <- LOF(y ~ . - 1, dat, control)
+```
+
+The first column of `fwd$B` is `B0`, the constant basis function, so it is
+always kept. The code therefore tracks only the non-constant basis
+indices.
+
+The key objects are:
+
+- `Kstar`: the best subset at the current stage
+- `Jstar`: the best subset seen anywhere in the whole pruning path
+- `lofstar`: the best LOF value seen so far
+
+This distinction matters because the best overall model may appear before
+the end of the pruning sequence.
+
+## 5. Outer loop: shrink the model gradually
+
+The outer loop is:
+
+```r
+for (M in Mmax:2)
+```
+
+So the algorithm starts with the full forward model and repeatedly
+considers smaller models.
+
+At each stage it sets:
+
+```r
+b <- Inf
+L <- Kstar
+```
+
+where:
+
+- `L` is the current active set of non-constant basis indices
+- `b` stores the best stagewise LOF among the one-deletion candidates
+
+If tracing is enabled, the active set is printed with:
+
+```r
+if (control$trace) cat("L:", L, "\n")
+```
+
+## 6. Inner loop: test each possible deletion
+
+For each basis index `m` in the active set, the code forms a reduced
+subset:
+
+```r
+K <- setdiff(L, m)
+dat <- data.frame(y = fwd$y, fwd$B[, c(1, K), drop = FALSE])
+lof <- LOF(y ~ . - 1, dat, control)
+```
+
+This means:
+
+1. remove one basis term
+2. keep the intercept basis `B0`
+3. fit the reduced model
+4. compute its LOF score
+
+This is the core backward elimination step in MARS.
+
+## 7. Choosing the best stagewise deletion
+
+The best deletion at the current stage is tracked using:
+
+```r
+if (lof < b) {
+  b <- lof
+  Kstar <- K
+}
+```
+
+So `Kstar` becomes the reduced subset with the smallest LOF among all
+one-deletion candidates at that stage.
+
+That subset is then used as the starting point for the next outer-loop
+iteration.
+
+## 8. Tracking the best model overall
+
+The code separately updates the best overall subset with:
+
+```r
+if (lof < lofstar) {
+  lofstar <- lof
+  Jstar <- K
+}
+```
+
+So even if a model is not just the best stagewise deletion but the best
+model seen anywhere on the pruning path, it is remembered in `Jstar`.
+
+At the end, the returned pruned model is based on `Jstar`, not simply on
+the final `Kstar`.
+
+## 9. Small conceptual example
+
+Suppose the forward pass produced basis columns:
+
+- `B0`
+- `B1`
+- `B2`
+- `B3`
+- `B4`
+
+The backward step begins by testing all one-term deletions:
+
+- keep `{B2, B3, B4}`
+- keep `{B1, B3, B4}`
+- keep `{B1, B2, B4}`
+- keep `{B1, B2, B3}`
+
+If the LOF scores are:
+
+| kept subset | LOF |
+|---|---:|
+| `{B2, B3, B4}` | 0.42 |
+| `{B1, B3, B4}` | 0.36 |
+| `{B1, B2, B4}` | 0.39 |
+| `{B1, B2, B3}` | 0.48 |
+
+then the best stagewise deletion is the one leaving `{B1, B3, B4}`.
+That subset becomes the next working model, and if `0.36` is also the
+lowest LOF seen so far, it becomes `Jstar` as well.
+
+## 10. Keeping the intercept basis
+
+At the end of the procedure, the intercept basis is restored explicitly:
+
+```r
+Jstar <- c(1, Jstar)
+list(y = fwd$y, B = fwd$B[, Jstar, drop = FALSE], Bfuncs = fwd$Bfuncs[Jstar])
+```
+
+This ensures that the final basis matrix includes `B0`, which acts as the
+intercept in the later linear model fit.
+
+That matches the fitting step in `mars()`, which uses:
+
+```r
+lm(y ~ . - 1, data = data.frame(y = y, bwd$B))
+```
+
+The `- 1` is used because the basis matrix already contains the constant
+term.
+
+## 11. Why this implementation is reasonable
+
+This backward pruning approach works well for an educational MARS package
+because:
+
+- it is easy to understand
+- it follows the standard “grow then prune” MARS strategy
+- it keeps the symbolic basis definitions and numerical basis matrix
+  aligned
+- it returns a pruned model that can still be used for interpretation and
+  prediction
+
+Its main simplification is computational cost: each pruning stage refits
+multiple linear models from scratch. That is acceptable here because the
+goal is clarity rather than production-level optimization.
+
+## 12. Summary
+
+`bwd_stepwise()` simplifies the forward basis expansion by repeatedly:
+
+1. trying all one-term deletions
+2. computing the penalized LOF score for each reduced model
+3. keeping the best stagewise deletion
+4. remembering the best overall subset seen during pruning
+
+So the backward step turns the large forward model into a smaller final
+model by balancing goodness of fit against complexity.

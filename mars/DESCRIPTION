@@ -1,0 +1,14 @@
+Package: mars
+Type: Package
+Title: Educational Multivariate Adaptive Regression Splines
+Version: 0.1.0
+Authors@R: person("Shivansh", family = "Ghai", email = "Sga169@sfu.ca", role = c("aut", "cre"))
+Description: A lightweight educational implementation of the Multivariate
+    Adaptive Regression Splines (MARS) algorithm for STAT 360.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 2.10)
+LazyData: true
+RoxygenNote: 7.3.2
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3
