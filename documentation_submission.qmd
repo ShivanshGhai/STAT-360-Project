@@ -9,7 +9,7 @@ editor_options:
 ---
 
 **Package / Repo:** `mars`\
-**Author:** Shivansh\
+**Author:** Shivansh Ghai\
 **GitHub Repo Link:** <https://github.com/ShivanshGhai/STAT-360-Project>
 
 ------------------------------------------------------------------------
