@@ -251,3 +251,16 @@ goal is clarity rather than production-level optimization.
 
 So the backward step turns the large forward model into a smaller final
 model by balancing goodness of fit against complexity.
+
+## Note on the hinge function
+
+The basis evaluation inside `make_basis()` relies on the hinge function 
+`h(s, x, t) = max(s * (x - t), 0)`, which is implemented in C++ via Rcpp 
+in `src/hinge.cpp`. This is called as:
+
+```r
+b <- b * h(s, x[, v], t)
+```
+
+The C++ implementation replaces the original `pmax()` call for improved 
+performance.

@@ -8,6 +8,8 @@ Description: A lightweight educational implementation of the Multivariate
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 2.10)
+Imports: Rcpp (>= 1.0.0)
+LinkingTo: Rcpp
 LazyData: true
 RoxygenNote: 7.3.2
 Suggests: testthat (>= 3.0.0)

@@ -94,7 +94,7 @@ Important components include:
 
 ## 6. Author(s)
 
-Shivansh
+Shivansh Ghai
 
 ## 7. References
 

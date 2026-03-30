@@ -15,7 +15,7 @@ make_basis <- function(x, funcs) {
     s <- funcs[i, "s"]
     v <- funcs[i, "v"]
     t <- funcs[i, "t"]
-    b <- b * pmax(s * (x[, v] - t), 0)
+    b <- b * h(s, x[, v], t)
   }
   unname(b)
 }

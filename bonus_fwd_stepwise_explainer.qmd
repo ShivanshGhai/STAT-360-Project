@@ -76,10 +76,11 @@ basis terms.
 ## 5. Evaluating a basis function
 
 The helper function `make_basis(x, funcs)` converts the symbolic form into
-a numeric vector. Its core line is:
+a numeric vector. h() is implemented in C++ via Rcpp in src/hinge.cpp 
+for improved performance. Its core line is:
 
 ```r
-b <- b * pmax(s * (x[, v] - t), 0)
+b <- b * h(s, x[, v], t)
 ```
 
 This handles both hinge directions at once:
