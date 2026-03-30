@@ -3,3 +3,6 @@
 *.html
 .Rhistory
 .RData
+*.html
+README_files/
+.DS_Store
