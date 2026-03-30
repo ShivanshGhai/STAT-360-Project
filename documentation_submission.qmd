@@ -80,7 +80,7 @@ while still exposing MARS-specific components such as:
 
 Important components include:
 
--   `call`: the model call
+-   `call`: the mars model call and the internal \`lm\` call
 -   `formula`: the original formula
 -   `y`: response values
 -   `B`: selected basis matrix
