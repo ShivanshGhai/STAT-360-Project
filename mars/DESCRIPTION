@@ -1,0 +1,17 @@
+Package: mars
+Type: Package
+Title: Educational Multivariate Adaptive Regression Splines
+Version: 0.1.0
+Authors@R: person("Shivansh", family = "Ghai", email = "Sga169@sfu.ca", role = c("aut", "cre"))
+Description: A lightweight educational implementation of the Multivariate
+    Adaptive Regression Splines (MARS) algorithm with forward basis
+    construction, backward pruning, prediction, and model diagnostics.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 2.10)
+Imports: Rcpp (>= 1.0.0)
+LinkingTo: Rcpp
+LazyData: true
+RoxygenNote: 7.3.2
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3

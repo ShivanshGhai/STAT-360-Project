@@ -1,0 +1,13 @@
+.DS_Store
+*.o
+*.so
+*.dll
+*.tar.gz
+*.Rcheck/
+*_files/
+*.html
+.Rhistory
+.RData
+*.html
+README_files/
+.DS_Store
